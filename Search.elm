@@ -25,7 +25,7 @@ main =
 
 type alias Model =
     { optionList : Dict.Dict String String
-    , selectedOptions : List String
+    , selectedOptions : List ( String, String )
     }
 
 
@@ -77,11 +77,14 @@ update msg model =
 view : Model -> Html Msg
 view model =
     div
-        []
+        [ style [ ( "width", "100%" ) ] ]
         [ h1 [] [ text "Search" ]
-        , select [ onInput AddOption ]
-            (List.map mkOption <| Dict.keys model.optionList)
-        , div [] [ text (toString model.selectedOptions) ]
+        , div [ style [ ( "text-align", "center" ) ] ]
+            [ text "Select: "
+            , select [ onInput AddOption ]
+                (List.map mkOption <| "-- Select --" :: Dict.keys model.optionList)
+            ]
+        , div [] (List.map optionToFormControl model.selectedOptions)
         ]
 
 
@@ -111,7 +114,6 @@ getOptions =
             Decode.list (Decode.list Decode.string)
 
         request =
-            -- Http.get url decoder
             Http.get url decoder
     in
     Http.send NewOptions request
@@ -130,10 +132,76 @@ mkOption s =
     Html.option [] [ Html.text s ]
 
 
+addOption : Model -> String -> List ( String, String )
 addOption model opt =
-    case List.member opt model.selectedOptions of
-        True ->
+    let
+        isAlreadySelected =
+            List.member opt (List.map Tuple.first model.selectedOptions)
+    in
+    case ( Dict.get opt model.optionList, isAlreadySelected ) of
+        ( Just dataType, False ) ->
+            model.selectedOptions ++ [ ( opt, dataType ) ]
+
+        ( _, _ ) ->
             model.selectedOptions
 
-        _ ->
-            model.selectedOptions ++ [ opt ]
+
+optionToFormControl : ( String, String ) -> Html msg
+optionToFormControl ( optionName, dataType ) =
+    let
+        title =
+            [ th [] [ text optionName ] ]
+
+        el =
+            case dataType of
+                "number" ->
+                    [ td []
+                        [ text "Min: "
+                        , input [ type_ "text", placeholder "min", name ("min__" ++ optionName) ] []
+                        ]
+                    , td []
+                        [ text "Max: "
+                        , input [ type_ "text", placeholder "max", name ("max__" ++ optionName) ] []
+                        ]
+                    ]
+
+                _ ->
+                    [ td [] [ input [ type_ "text", placeholder dataType ] [] ]
+                    , td [] []
+                    ]
+
+        buttons =
+            [ td [] [ input [ type_ "submit" ] [] ]
+            , td [] [ input [ type_ "button" ] [] ]
+            ]
+    in
+    table [ style [ ( "width", "100%" ) ] ]
+        [ tr [] (title ++ el ++ buttons) ]
+
+
+
+{--
+optionToFormControl : ( String, String ) -> Html msg
+optionToFormControl ( optionName, dataType ) =
+    let
+        title =
+            span [ style [ ( "font-weight", "bold" ) ] ] [ text optionName ]
+
+        el =
+            case dataType of
+                "number" ->
+                    [ text "Min: "
+                    , input [ type_ "text", placeholder "min", name ("min__" ++ optionName) ]
+                        []
+                    , text "Max: "
+                    , input
+                        [ type_ "text", placeholder "max", name ("max__" ++ optionName) ]
+                        []
+                    ]
+
+                _ ->
+                    [ input [ type_ "text", placeholder dataType ] [] ]
+    in
+    div []
+        [ span [] (List.concat [ title :: el ]) ]
+        --}
