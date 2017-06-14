@@ -1,0 +1,106 @@
+module Main exposing (..)
+
+import Debug
+import Html exposing (..)
+import Html.Attributes exposing (..)
+import Html.Events exposing (..)
+import Http
+import Json.Decode as Decode
+
+
+main =
+    Html.program
+        { init = init
+        , view = view
+        , update = update
+        , subscriptions = subscriptions
+        }
+
+
+
+-- MODEL
+
+
+type alias Model =
+    { options : String
+    , error : String
+    }
+
+
+init : ( Model, Cmd Msg )
+init =
+    ( Model "" "", getOptions )
+
+
+
+-- UPDATE
+
+
+type Msg
+    = MorePlease
+    | NewOptions (Result Http.Error String)
+
+
+update : Msg -> Model -> ( Model, Cmd Msg )
+update msg model =
+    case msg of
+        MorePlease ->
+            ( model, getOptions )
+
+        NewOptions (Ok newOptions) ->
+            let
+                foo =
+                    Debug.log "newOptions" newOptions
+            in
+            ( Model newOptions "", Cmd.none )
+
+        NewOptions (Err err) ->
+            let
+                foo =
+                    Debug.log "error" err
+            in
+            ( model, Cmd.none )
+
+
+
+-- VIEW
+
+
+view : Model -> Html Msg
+view model =
+    div
+        []
+        [ h1 [] [ text "Search" ]
+        , div [] [ text (map model.options) ]
+        ]
+
+
+
+-- SUBSCRIPTIONS
+
+
+subscriptions : Model -> Sub Msg
+subscriptions model =
+    Sub.none
+
+
+
+-- HTTP
+
+
+getOptions : Cmd Msg
+getOptions =
+    let
+        foo =
+            Debug.log "getting options" 1
+
+        url =
+            "https://www.imicrobe.us/sample/search_params.json"
+
+        decoder =
+            Decode.list (Decode.list Decode.string)
+
+        request =
+            Http.get url decoder
+    in
+    Http.send NewOptions request
