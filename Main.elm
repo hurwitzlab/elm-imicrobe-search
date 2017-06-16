@@ -7,7 +7,7 @@ import Html.Attributes exposing (..)
 import Html.Events exposing (..)
 import Http
 import Json.Decode as Decode
-import RemoteData
+import RemoteData exposing (..)
 
 
 main =
@@ -26,12 +26,16 @@ main =
 type alias Model =
     { optionList : Dict.Dict String String
     , selectedOptions : List ( String, String )
+    , optionValue : Dict.Dict String String
+    , searchResults : WebData (Dict.Dict (List String))
     }
 
 
 initialModel =
     { optionList = Dict.empty
     , selectedOptions = []
+    , optionValue = Dict.empty
+    , searchResults = NotAsked
     }
 
 
@@ -49,6 +53,12 @@ type Msg
     | NewOptions (Result Http.Error (List (List String)))
     | AddOption String
     | RemoveOption String
+    | UpdateOptionValue String String
+    | Search
+
+
+
+--    | UpdateSearchResults WebData (Dict.dict (List String)))
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -73,8 +83,19 @@ update msg model =
         RemoveOption opt ->
             ( { model | selectedOptions = rmOption model.selectedOptions opt }, Cmd.none )
 
+        UpdateOptionValue opt val ->
+            ( { model | optionValue = Dict.insert opt val model.optionValue }, Cmd.none )
+
+        Search ->
+            -- ( model, doSearch )
+            ( model, Cmd.none )
 
 
+
+{--
+        UpdateSearchResults (Ok newResults) ->
+            ( { model | searchResults = newResults }, Cmd.none )
+            --}
 -- VIEW
 
 
@@ -89,6 +110,8 @@ view model =
                 (List.map mkOption <| "-- Select --" :: Dict.keys model.optionList)
             ]
         , div [] [ mkOptionTable model.selectedOptions ]
+        , div [] [ showSearchResults model.searchResults ]
+        , div [] [ text (toString model.optionValue) ]
         ]
 
 
@@ -156,8 +179,24 @@ rmOption optionList optToRemove =
 
 
 mkOptionTable options =
-    table [ style [ ( "width", "100%" ) ] ]
-        (List.map mkRow options)
+    let
+        rows =
+            List.map mkRow options
+
+        searchButtonRow =
+            [ tr []
+                [ td [ colspan 4, style [ ( "text-align", "center" ) ] ]
+                    [ button [ onClick Search ] [ text "Search" ] ]
+                ]
+            ]
+    in
+    case rows of
+        [] ->
+            text ""
+
+        _ ->
+            table [ style [ ( "width", "100%" ) ] ]
+                (rows ++ searchButtonRow)
 
 
 mkRow : ( String, String ) -> Html Msg
@@ -166,27 +205,66 @@ mkRow ( optionName, dataType ) =
         title =
             [ th [] [ text optionName ] ]
 
+        minName =
+            "min__" ++ optionName
+
+        maxName =
+            "max__" ++ optionName
+
         el =
             case dataType of
                 "number" ->
-                    [ td []
+                    [ td [ onInput (UpdateOptionValue minName) ]
                         [ text "Min: "
-                        , input [ type_ "text", placeholder "min", name ("min__" ++ optionName) ] []
+                        , input [ type_ "text", placeholder "min", name minName ] []
                         ]
-                    , td []
+                    , td [ onInput (UpdateOptionValue maxName) ]
                         [ text "Max: "
-                        , input [ type_ "text", placeholder "max", name ("max__" ++ optionName) ] []
+                        , input [ type_ "text", placeholder "max", name maxName ] []
                         ]
                     ]
 
                 _ ->
-                    [ td [] [ input [ type_ "text", placeholder dataType ] [] ]
+                    [ td [ onInput (UpdateOptionValue optionName) ]
+                        [ input [ type_ "text", placeholder dataType ] [] ]
                     , td [] []
                     ]
 
         buttons =
-            [ td [] [ button [] [ text "Search" ] ]
-            , td [] [ button [ onClick (RemoveOption optionName) ] [ text "Remove" ] ]
+            [ td [] [ button [ onClick (RemoveOption optionName) ] [ text "Remove" ] ]
             ]
     in
     tr [] (title ++ el ++ buttons)
+
+
+showSearchResults results =
+    case results of
+        NotAsked ->
+            div [ style [ ( "text-align", "center" ) ] ]
+                [ text "Choose you must"
+                ]
+
+        Loading ->
+            text "Loading"
+
+        Failure e ->
+            text (toString e)
+
+        Success a ->
+            text "All good!"
+
+
+
+{--
+doSearch options =
+    let
+        url =
+            "https://www.imicrobe.us/sample/search_results.json"
+
+        payload =
+            Encode.object 0 model.optionValue
+    in
+    Http.post url decoder
+        |> RemoteData.sendRequest
+        |> Cmd.map UpdateSearchResults
+        --}
