@@ -78,7 +78,12 @@ update msg model =
             ( model, Cmd.none )
 
         AddOption opt ->
-            ( { model | selectedOptions = addOption model opt }, Cmd.none )
+            ( { model
+                | selectedOptions = addOption model opt
+                , optionList = Dict.remove opt model.optionList
+              }
+            , Cmd.none
+            )
 
         RemoveOption opt ->
             ( { model | selectedOptions = rmOption model.selectedOptions opt }, Cmd.none )
@@ -254,8 +259,6 @@ showSearchResults results =
             text "All good!"
 
 
-
-{--
 doSearch options =
     let
         url =
@@ -267,4 +270,3 @@ doSearch options =
     Http.post url decoder
         |> RemoteData.sendRequest
         |> Cmd.map UpdateSearchResults
-        --}
