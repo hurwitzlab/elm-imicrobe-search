@@ -7,6 +7,7 @@ import Html.Attributes exposing (..)
 import Html.Events exposing (..)
 import Http
 import Json.Decode as Decode
+import Json.Encode as Encode
 import RemoteData exposing (..)
 
 
@@ -23,11 +24,18 @@ main =
 -- MODEL
 
 
+type JsonType
+    = StrType String
+    | IntType Int
+    | FloatType Float
+    | ValueType Decode.Value
+
+
 type alias Model =
     { optionList : Dict.Dict String String
     , selectedOptions : List ( String, String )
     , optionValue : Dict.Dict String String
-    , searchResults : WebData (Dict.Dict (List String))
+    , searchResults : WebData (List (Dict.Dict String JsonType))
     }
 
 
@@ -55,10 +63,7 @@ type Msg
     | RemoveOption String
     | UpdateOptionValue String String
     | Search
-
-
-
---    | UpdateSearchResults WebData (Dict.dict (List String)))
+    | UpdateSearchResults (WebData (List (Dict.Dict String JsonType)))
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -92,15 +97,13 @@ update msg model =
             ( { model | optionValue = Dict.insert opt val model.optionValue }, Cmd.none )
 
         Search ->
-            -- ( model, doSearch )
-            ( model, Cmd.none )
+            ( model, doSearch model.optionValue )
+
+        UpdateSearchResults response ->
+            ( { model | searchResults = response }, Cmd.none )
 
 
 
-{--
-        UpdateSearchResults (Ok newResults) ->
-            ( { model | searchResults = newResults }, Cmd.none )
-            --}
 -- VIEW
 
 
@@ -136,9 +139,6 @@ subscriptions model =
 getOptions : Cmd Msg
 getOptions =
     let
-        foo =
-            Debug.log "getting options" 1
-
         url =
             "https://www.imicrobe.us/sample/search_params.json"
 
@@ -255,8 +255,30 @@ showSearchResults results =
         Failure e ->
             text (toString e)
 
-        Success a ->
-            text "All good!"
+        Success data ->
+            searchResultsTable data
+
+
+searchResultsTable results =
+    case results of
+        [] ->
+            text "No results"
+
+        _ ->
+            div [] (List.map searchResultRow results)
+
+
+searchResultRow result =
+    let
+        sampleName =
+            case Dict.get "specimen__sample_name" result of
+                Just (StrType name) ->
+                    name
+
+                _ ->
+                    "NA"
+    in
+    div [] [ text sampleName ]
 
 
 doSearch options =
@@ -264,9 +286,31 @@ doSearch options =
         url =
             "https://www.imicrobe.us/sample/search_results.json"
 
-        payload =
-            Encode.object 0 model.optionValue
+        dictList =
+            Dict.toList options
+
+        encoded =
+            Encode.object (List.map (\( k, v ) -> ( k, Encode.string v )) dictList)
+
+        body =
+            Http.jsonBody encoded
+
+        decoderDict =
+            [ Decode.string
+                |> Decode.map StrType
+            , Decode.int
+                |> Decode.map IntType
+            , Decode.float
+                |> Decode.map FloatType
+            , Decode.value
+                |> Decode.map ValueType
+            ]
+                |> Decode.oneOf
+                |> Decode.dict
+
+        decoder =
+            Decode.at [ "samples" ] (Decode.list decoderDict)
     in
-    Http.post url decoder
+    Http.post url body decoder
         |> RemoteData.sendRequest
         |> Cmd.map UpdateSearchResults
