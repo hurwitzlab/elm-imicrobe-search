@@ -9,6 +9,7 @@ import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
 import RemoteData exposing (..)
+import Set
 
 
 main =
@@ -32,7 +33,7 @@ type JsonType
 
 
 type alias Model =
-    { optionList : Dict.Dict String String
+    { optionList : WebData (Dict.Dict String String)
     , selectedOptions : List ( String, String )
     , optionValue : Dict.Dict String String
     , searchResults : WebData (List (Dict.Dict String JsonType))
@@ -40,7 +41,7 @@ type alias Model =
 
 
 initialModel =
-    { optionList = Dict.empty
+    { optionList = NotAsked
     , selectedOptions = []
     , optionValue = Dict.empty
     , searchResults = NotAsked
@@ -52,13 +53,9 @@ init =
     ( initialModel, getOptions )
 
 
-
--- UPDATE
-
-
 type Msg
     = MorePlease
-    | NewOptions (Result Http.Error (List (List String)))
+    | NewOptions (WebData (Dict.Dict String String))
     | AddOption String
     | RemoveOption String
     | UpdateOptionValue String String
@@ -72,20 +69,14 @@ update msg model =
         MorePlease ->
             ( model, getOptions )
 
-        NewOptions (Ok newOptions) ->
-            let
-                dict =
-                    List.filterMap toTuple newOptions |> Dict.fromList
-            in
-            ( { model | optionList = dict }, Cmd.none )
-
-        NewOptions (Err err) ->
-            ( model, Cmd.none )
+        NewOptions response ->
+            ( { model | optionList = response }, Cmd.none )
 
         AddOption opt ->
             ( { model
                 | selectedOptions = addOption model opt
-                , optionList = Dict.remove opt model.optionList
+
+                -- , optionList = Dict.remove opt model.optionList
               }
             , Cmd.none
             )
@@ -112,11 +103,7 @@ view model =
     div
         [ style [ ( "width", "100%" ) ] ]
         [ h1 [] [ text "Search" ]
-        , div [ style [ ( "text-align", "center" ) ] ]
-            [ text "Select: "
-            , select [ onInput AddOption ]
-                (List.map mkOption <| "-- Select --" :: Dict.keys model.optionList)
-            ]
+        , div [ style [ ( "text-align", "center" ) ] ] (mkOptionSelect model)
         , div [] [ mkOptionTable model.selectedOptions ]
         , div [] [ showSearchResults model.searchResults ]
         , div [] [ text (toString model.optionValue) ]
@@ -143,38 +130,85 @@ getOptions =
             "https://www.imicrobe.us/sample/search_params.json"
 
         decoder =
-            Decode.list (Decode.list Decode.string)
+            Decode.dict Decode.string
 
-        request =
-            Http.get url decoder
+        --request =
+        --   Http.get url decoder
     in
-    Http.send NewOptions request
+    Http.get url decoder
+        |> RemoteData.sendRequest
+        |> Cmd.map NewOptions
 
 
-toTuple xs =
-    case xs of
-        x :: y :: [] ->
-            Just ( x, y )
+mkOptionSelect model =
+    case model.optionList of
+        NotAsked ->
+            [ text "NotAsked" ]
 
-        _ ->
-            Nothing
+        Loading ->
+            [ text "Loading" ]
+
+        Failure e ->
+            [ text (toString e) ]
+
+        Success options ->
+            let
+                first =
+                    Html.option [] [ text "-- Select --" ]
+
+                alreadySelected =
+                    List.map Tuple.first model.selectedOptions |> Set.fromList
+
+                showKeys =
+                    Dict.keys options
+                        |> List.filter (\v -> not (Set.member v alreadySelected))
+
+                rest =
+                    List.map mkOption showKeys
+            in
+            [ text "Select: "
+            , select [ onInput AddOption ] (first :: rest)
+            ]
+
+
+ucFirst s =
+    (String.toUpper <| String.slice 0 1 s) ++ String.slice 1 (String.length s) s
+
+
+prettyName s =
+    let
+        parts =
+            String.split "__" s
+
+        ( category, name ) =
+            case parts of
+                first :: rest :: [] ->
+                    ( first, rest )
+
+                _ ->
+                    ( "NA", String.join "_" parts )
+
+        nameParts =
+            String.split "_" name
+    in
+    ucFirst category ++ ": " ++ String.join " " (List.map ucFirst nameParts)
 
 
 mkOption s =
-    Html.option [] [ Html.text s ]
+    Html.option [ value s ] [ text (prettyName s) ]
 
 
-addOption : Model -> String -> List ( String, String )
-addOption model opt =
-    let
-        isAlreadySelected =
-            List.member opt (List.map Tuple.first model.selectedOptions)
-    in
-    case ( Dict.get opt model.optionList, isAlreadySelected ) of
-        ( Just dataType, False ) ->
-            model.selectedOptions ++ [ ( opt, dataType ) ]
+addOption model optionName =
+    case model.optionList of
+        Success dict ->
+            case Dict.get optionName dict of
+                Just dataType ->
+                    model.selectedOptions ++ [ ( optionName, dataType ) ]
 
-        ( _, _ ) ->
+                _ ->
+                    model.selectedOptions
+
+        _ ->
             model.selectedOptions
 
 
@@ -208,7 +242,7 @@ mkRow : ( String, String ) -> Html Msg
 mkRow ( optionName, dataType ) =
     let
         title =
-            [ th [] [ text optionName ] ]
+            [ th [] [ text (prettyName optionName) ] ]
 
         minName =
             "min__" ++ optionName
