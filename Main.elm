@@ -36,6 +36,7 @@ type JsonType
 type alias Model =
     { optionList : WebData (Dict.Dict String String)
     , restrictedOptionList : Dict.Dict String String
+    , restrictedOptionValues : Dict.Dict String (List JsonType)
     , selectedOptions : List ( String, String )
     , optionValue : Dict.Dict String String
     , searchResults : WebData (List (Dict.Dict String JsonType))
@@ -45,6 +46,7 @@ type alias Model =
 initialModel =
     { optionList = NotAsked
     , restrictedOptionList = Dict.empty
+    , restrictedOptionValues = Dict.empty
     , selectedOptions = []
     , optionValue = Dict.empty
     , searchResults = NotAsked
@@ -96,6 +98,7 @@ update msg model =
             ( { model
                 | searchResults = response
                 , restrictedOptionList = mkRestrictedOptionList model.optionList response
+                , restrictedOptionValues = mkRestrictedOptionValues response
               }
             , Cmd.none
             )
@@ -115,7 +118,8 @@ view model =
         , div [] [ mkOptionTable model.selectedOptions ]
         , div [] [ showSearchResults model ]
         , div [] [ text <| "optionValues = " ++ toString model.optionValue ]
-        , div [] [ text <| "restricted = " ++ toString model.restrictedOptionList ]
+        , div [] [ text <| "restrictedOptions = " ++ toString model.restrictedOptionList ]
+        , div [] [ text <| "restrictedValues = " ++ toString model.restrictedOptionValues ]
         , div [] [ text <| "searchResults = " ++ toString model.searchResults ]
         ]
 
@@ -311,15 +315,32 @@ showSearchResults model =
             searchResultsTable data model.selectedOptions
 
 
+
+-- searchResultsTable :
+--     List (Dict.Dict String JsonType) ->
+--     List ( String, String ) ->
+-- List Html.msg
+
+
 searchResultsTable results selectedOptions =
     case results of
         [] ->
             text "No results"
 
         _ ->
-            -- div [] (List.map searchResultRow results selectedOptions)
-            table []
-                (List.map (searchResultRow selectedOptions) results)
+            let
+                names =
+                    List.map Tuple.first selectedOptions
+
+                header =
+                    [ tr []
+                        (List.map (\s -> th [] [ text s ]) ("name" :: names))
+                    ]
+
+                rows =
+                    List.map (searchResultRow selectedOptions) results
+            in
+            table [] (header ++ rows)
 
 
 searchResultRow selectedOptions result =
@@ -416,3 +437,24 @@ mkRestrictedOptionList optionList result =
 
         _ ->
             Dict.empty
+
+
+mkRestrictedOptionValues : WebData (List (Dict.Dict String JsonType)) -> Dict.Dict String (List JsonType)
+mkRestrictedOptionValues response =
+    case response of
+        Success data ->
+            List.foldl mergeDicts Dict.empty data
+
+        _ ->
+            Dict.empty
+
+
+mergeDicts : Dict.Dict comparable a -> Dict.Dict comparable (List a) -> Dict.Dict comparable (List a)
+mergeDicts s d =
+    Dict.merge
+        (\key a dict -> Dict.insert key [ a ] dict)
+        (\key a b dict -> Dict.insert key (a :: b) dict)
+        (\key b dict -> Dict.insert key b dict)
+        s
+        d
+        Dict.empty
