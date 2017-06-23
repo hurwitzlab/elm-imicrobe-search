@@ -8,6 +8,7 @@ import Html.Events exposing (..)
 import Http
 import Json.Decode as Decode
 import Json.Encode as Encode
+import List.Extra exposing (unique)
 import RemoteData exposing (..)
 import Set
 
@@ -34,6 +35,7 @@ type JsonType
 
 type alias Model =
     { optionList : WebData (Dict.Dict String String)
+    , restrictedOptionList : Dict.Dict String String
     , selectedOptions : List ( String, String )
     , optionValue : Dict.Dict String String
     , searchResults : WebData (List (Dict.Dict String JsonType))
@@ -42,6 +44,7 @@ type alias Model =
 
 initialModel =
     { optionList = NotAsked
+    , restrictedOptionList = Dict.empty
     , selectedOptions = []
     , optionValue = Dict.empty
     , searchResults = NotAsked
@@ -54,8 +57,7 @@ init =
 
 
 type Msg
-    = MorePlease
-    | NewOptions (WebData (Dict.Dict String String))
+    = NewOptions (WebData (Dict.Dict String String))
     | AddOption String
     | RemoveOption String
     | UpdateOptionValue String String
@@ -66,23 +68,23 @@ type Msg
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        MorePlease ->
-            ( model, getOptions )
-
         NewOptions response ->
             ( { model | optionList = response }, Cmd.none )
 
         AddOption opt ->
-            ( { model
-                | selectedOptions = addOption model opt
-
-                -- , optionList = Dict.remove opt model.optionList
-              }
-            , Cmd.none
-            )
+            ( { model | selectedOptions = addOption model opt }, Cmd.none )
 
         RemoveOption opt ->
-            ( { model | selectedOptions = rmOption model.selectedOptions opt }, Cmd.none )
+            let
+                newOptionValue =
+                    rmOptionValue model.optionValue opt
+            in
+            ( { model
+                | selectedOptions = rmOption model.selectedOptions opt
+                , optionValue = newOptionValue
+              }
+            , doSearch newOptionValue
+            )
 
         UpdateOptionValue opt val ->
             ( { model | optionValue = Dict.insert opt val model.optionValue }, Cmd.none )
@@ -91,7 +93,12 @@ update msg model =
             ( model, doSearch model.optionValue )
 
         UpdateSearchResults response ->
-            ( { model | searchResults = response }, Cmd.none )
+            ( { model
+                | searchResults = response
+                , restrictedOptionList = mkRestrictedOptionList model.optionList response
+              }
+            , Cmd.none
+            )
 
 
 
@@ -104,9 +111,12 @@ view model =
         [ style [ ( "width", "100%" ) ] ]
         [ h1 [] [ text "Search" ]
         , div [ style [ ( "text-align", "center" ) ] ] (mkOptionSelect model)
+        , div [] [ text <| "selectedOptions = " ++ toString model.selectedOptions ]
         , div [] [ mkOptionTable model.selectedOptions ]
-        , div [] [ showSearchResults model.searchResults ]
-        , div [] [ text (toString model.optionValue) ]
+        , div [] [ showSearchResults model ]
+        , div [] [ text <| "optionValues = " ++ toString model.optionValue ]
+        , div [] [ text <| "restricted = " ++ toString model.restrictedOptionList ]
+        , div [] [ text <| "searchResults = " ++ toString model.searchResults ]
         ]
 
 
@@ -131,9 +141,6 @@ getOptions =
 
         decoder =
             Decode.dict Decode.string
-
-        --request =
-        --   Http.get url decoder
     in
     Http.get url decoder
         |> RemoteData.sendRequest
@@ -166,7 +173,7 @@ mkOptionSelect model =
                 rest =
                     List.map mkOption showKeys
             in
-            [ text "Select: "
+            [ text "Field: "
             , select [ onInput AddOption ] (first :: rest)
             ]
 
@@ -217,10 +224,21 @@ rmOption optionList optToRemove =
     List.filter (\( k, v ) -> k /= optToRemove) optionList
 
 
+rmOptionValue : Dict.Dict String String -> String -> Dict.Dict String String
+rmOptionValue optionValue optToRemove =
+    let
+        names =
+            Set.fromList [ optToRemove, "min__" ++ optToRemove, "max__" ++ optToRemove ]
+    in
+    Dict.toList optionValue
+        |> List.filter (\( k, v ) -> not (Set.member k names))
+        |> Dict.fromList
+
+
 mkOptionTable options =
     let
         rows =
-            List.map mkRow options
+            List.map mkOptionRow options
 
         searchButtonRow =
             [ tr []
@@ -231,15 +249,15 @@ mkOptionTable options =
     in
     case rows of
         [] ->
-            text ""
+            text "No options"
 
         _ ->
             table [ style [ ( "width", "100%" ) ] ]
                 (rows ++ searchButtonRow)
 
 
-mkRow : ( String, String ) -> Html Msg
-mkRow ( optionName, dataType ) =
+mkOptionRow : ( String, String ) -> Html Msg
+mkOptionRow ( optionName, dataType ) =
     let
         title =
             [ th [] [ text (prettyName optionName) ] ]
@@ -276,11 +294,11 @@ mkRow ( optionName, dataType ) =
     tr [] (title ++ el ++ buttons)
 
 
-showSearchResults results =
-    case results of
+showSearchResults model =
+    case model.searchResults of
         NotAsked ->
             div [ style [ ( "text-align", "center" ) ] ]
-                [ text "Choose you must"
+                [ text "Select some fields to search"
                 ]
 
         Loading ->
@@ -290,29 +308,47 @@ showSearchResults results =
             text (toString e)
 
         Success data ->
-            searchResultsTable data
+            searchResultsTable data model.selectedOptions
 
 
-searchResultsTable results =
+searchResultsTable results selectedOptions =
     case results of
         [] ->
             text "No results"
 
         _ ->
-            div [] (List.map searchResultRow results)
+            -- div [] (List.map searchResultRow results selectedOptions)
+            table []
+                (List.map (searchResultRow selectedOptions) results)
 
 
-searchResultRow result =
+searchResultRow selectedOptions result =
     let
-        sampleName =
-            case Dict.get "specimen__sample_name" result of
-                Just (StrType name) ->
-                    name
+        getVal key =
+            case Dict.get key result of
+                Just a ->
+                    toString a
 
                 _ ->
                     "NA"
+
+        mkTd ( key, dataType ) =
+            let
+                textAlign =
+                    case dataType of
+                        "number" ->
+                            "right"
+
+                        _ ->
+                            "left"
+            in
+            td [ style [ ( "text-align", textAlign ) ] ] [ text (getVal key) ]
+
+        allFields =
+            ( "specimen__sample_name", "string" ) :: selectedOptions
     in
-    div [] [ text sampleName ]
+    tr []
+        (List.map mkTd allFields)
 
 
 doSearch options =
@@ -348,3 +384,35 @@ doSearch options =
     Http.post url body decoder
         |> RemoteData.sendRequest
         |> Cmd.map UpdateSearchResults
+
+
+mkRestrictedOptionList :
+    WebData (Dict.Dict String String)
+    -> WebData (List (Dict.Dict String JsonType))
+    -> Dict.Dict String String
+mkRestrictedOptionList optionList result =
+    let
+        optionDict =
+            case optionList of
+                Success optionDict ->
+                    optionDict
+
+                _ ->
+                    Dict.empty
+    in
+    case result of
+        Success data ->
+            let
+                keys =
+                    List.map Dict.keys data
+                        |> List.concat
+                        |> List.filter (\v -> v /= "_id")
+                        |> unique
+
+                types =
+                    List.filterMap (\k -> Dict.get k optionDict) keys
+            in
+            Dict.fromList (List.map2 (,) keys types)
+
+        _ ->
+            Dict.empty
